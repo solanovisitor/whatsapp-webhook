@@ -103,7 +103,7 @@ app.use(
 );
 
 // GET / (verification handshake)
-app.get("/", (req, res) => {
+function handleVerify(req, res) {
   const { "hub.mode": mode, "hub.challenge": challenge, "hub.verify_token": token } = req.query;
 
   if (!verifyToken) return res.status(500).send("VERIFY_TOKEN not set");
@@ -113,16 +113,21 @@ app.get("/", (req, res) => {
     return res.status(200).send(String(challenge || ""));
   }
   return res.status(403).end();
-});
+}
 
-// POST / (dump payload + optional echo reply)
-app.post("/", async (req, res) => {
+// Support both "/" and "/webhooks/whatsapp" so you can point Meta to either path.
+app.get("/", handleVerify);
+app.get("/webhooks/whatsapp", handleVerify);
+
+async function handleWebhook(req, res) {
   const rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body || {}));
+  const timestamp = new Date().toISOString().replace("T", " ").slice(0, 19);
+  console.log(`\n\nWebhook POST received ${timestamp} path=${req.path}\n`);
   if (!verifySignature(req, rawBody)) {
+    console.log("invalid_signature");
     return res.status(403).json({ ok: false, error: "invalid_signature" });
   }
 
-  const timestamp = new Date().toISOString().replace("T", " ").slice(0, 19);
   console.log(`\n\nWebhook received ${timestamp}\n`);
   console.log(JSON.stringify(req.body || {}, null, 2));
 
@@ -136,7 +141,11 @@ app.post("/", async (req, res) => {
     const reply = `Echo: ${m.text}`;
     sendWhatsAppText(m.from, reply).catch((e) => console.error("[send-error]", e?.message || e));
   }
-});
+}
+
+// Support both "/" and "/webhooks/whatsapp" so you can point Meta to either path.
+app.post("/", handleWebhook);
+app.post("/webhooks/whatsapp", handleWebhook);
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
