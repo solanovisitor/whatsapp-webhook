@@ -30,10 +30,12 @@ const apiVersion = apiVersionRaw.startsWith("v") ? apiVersionRaw : `v${apiVersio
 
 // Optional signature verification (recommended)
 const appSecret = process.env.WHATSAPP_APP_SECRET || "";
-// Optional forward to HACS API (Option B). Defaults to your deployed hacs-api webhook route.
-// You can override in Render env if needed.
-const forwardUrl =
-  process.env.HACS_WEBHOOK_FORWARD_URL || "https://hacs-ai.onrender.com/webhooks/whatsapp";
+// Optional forward to HACS API (recommended).
+//
+// NOTE: we do NOT default this to any URL to avoid accidentally forwarding PHI to the wrong place.
+// Set HACS_WEBHOOK_FORWARD_URL in Render env to enable forwarding, e.g.
+//   https://<your-hacs-api>.onrender.com/webhooks/whatsapp
+const forwardUrl = (process.env.HACS_WEBHOOK_FORWARD_URL || "").trim();
 
 function digitsOnly(v) {
   return String(v || "").replace(/\D/g, "");
@@ -161,20 +163,28 @@ async function handleWebhook(req, res) {
   const msgs = extractInboundTextMessages(req.body || {});
   res.status(200).end();
 
-  // Option B: forward inbound text messages to hacs-api webhook.
-  // We only forward when there are actual text messages (ignore status-only callbacks).
-  if (msgs.length) {
+  // Option B: forward webhook payload to hacs-api.
+  //
+  // We forward the raw bytes + signature header so HACS can re-verify end-to-end.
+  // This is safe even for non-message callbacks; HACS will ignore what it doesn't need.
+  if (forwardUrl) {
     const sigHeader = req.get("X-Hub-Signature-256") || "";
     forwardToHacsWebhook(rawBody, sigHeader).then((out) => {
-      if (out?.ok) {
-        console.log(`[forward] ok url=${forwardUrl} status=${out.status}`);
-      } else {
-        console.log(`[forward] failed url=${forwardUrl} error=${out?.error}`);
-      }
+      if (out?.ok) console.log(`[forward] ok url=${forwardUrl} status=${out.status}`);
+      else console.log(`[forward] failed url=${forwardUrl} error=${out?.error}`);
     });
   }
 
-  const echoEnabled = String(process.env.WHATSAPP_ECHO_REPLY || "1").toLowerCase() !== "0";
+  // Default behavior:
+  // - if forwarding is enabled -> do NOT echo (avoid double replies: echo + HACS agent)
+  // - otherwise -> echo is enabled unless WHATSAPP_ECHO_REPLY=0
+  const echoEnv = process.env.WHATSAPP_ECHO_REPLY;
+  const echoEnabled =
+    echoEnv != null
+      ? String(echoEnv).toLowerCase() !== "0"
+      : forwardUrl
+        ? false
+        : true;
   if (!echoEnabled) return;
 
   for (const m of msgs) {

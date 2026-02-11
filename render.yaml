@@ -18,6 +18,8 @@ services:
       - key: WHATSAPP_APP_SECRET
         sync: false
       - key: WHATSAPP_ECHO_REPLY
-        value: "1"
+        value: "0"
+      - key: HACS_WEBHOOK_FORWARD_URL
+        sync: false
 
 
